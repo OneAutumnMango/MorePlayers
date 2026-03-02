@@ -111,7 +111,12 @@ namespace MorePlayers.MP
 
         // ── PATCH 5: PlayerSelection.Start [Postfix] ─────────────────────────
         // Vanilla Start fills slots 0-9 from 10 scene children.
-        // Clone playerCards[0] for slots 10 to MAX-1 and scale all cards down.
+        // Clone playerCards[0] and botCards[0] for slots 10 to MAX-1.
+        // Scale all cards down so two rows of MAX/2 fit the same canvas width.
+        //
+        // botCards must be extended here because RefreshBots() does:
+        //   this.botCards[playerId - 1]
+        // which crashes at index 10+ if botCards is still size 10.
 
         [HarmonyPatch(typeof(PlayerSelection), "Start")]
         [HarmonyPostfix]
@@ -123,24 +128,43 @@ namespace MorePlayers.MP
             var playerCards   = GameModificationHelpers.GetPrivateField<PlayerCard[]>(__instance, "playerCards");
             var nameSelectors = GameModificationHelpers.GetPrivateField<NameSelector[]>(__instance, "nameSelectors");
 
-            PlayerCard template = playerCards[0];
-            Transform  root     = template.transform.parent;
-            float      scale    = 10f / maxP;
+            // ── Step 0: Extend the shared PlayerColors ScriptableObject ─────────
+            // PlayerCard.SetPlayerColor() accesses playerColors.colors[playerIndex + 1].
+            // All 10 scene cards share the same PlayerColors ScriptableObject asset.
+            // The asset only has 11 entries (indices 0-10 for players 1-10).
+            // For players 11-16 (playerIndex 10-15) we need colors[11]-colors[16].
+            // Extend the shared asset before Init is called on any cloned card.
+            var sharedPC = playerCards[0].playerColors;
+            if (sharedPC != null && sharedPC.colors != null && sharedPC.colors.Length < maxP + 1)
+            {
+                var orig = sharedPC.colors;
+                var ext  = new Color[maxP + 1];
+                for (int c = 0; c < maxP + 1; c++)
+                    ext[c] = c < orig.Length
+                        ? orig[c]
+                        : Color.HSVToRGB((float)c / (maxP + 1), 0.85f, 0.9f);
+                sharedPC.colors = ext;
+            }
 
-            // Scale down the 10 existing cards
+            // ── Extend playerCards ───────────────────────────────────────────
+            PlayerCard pcTemplate = playerCards[0];
+            Transform  pcRoot     = pcTemplate.transform.parent;
+            float      scale      = 10f / maxP;
+
+            // Scale down the 10 existing player cards
             for (int i = 0; i < 10; i++)
                 if (playerCards[i] != null)
                     playerCards[i].transform.localScale = Vector3.one * scale;
 
-            // Clone cards for slots 10 to maxP-1
+            // Clone player cards for slots 10 to maxP-1
             for (int i = 10; i < maxP; i++)
             {
-                GameObject cloned = UnityEngine.Object.Instantiate(template.gameObject, root);
+                GameObject cloned = UnityEngine.Object.Instantiate(pcTemplate.gameObject, pcRoot);
                 cloned.name = $"Player{i + 1} Card";
 
-                var tf   = cloned.transform;
-                var pos  = tf.localPosition;
-                pos.y    = -564.8f;
+                var tf  = cloned.transform;
+                var pos = tf.localPosition;
+                pos.y   = -564.8f;
                 tf.localPosition = pos;
                 tf.localScale    = Vector3.one * scale;
 
@@ -158,6 +182,37 @@ namespace MorePlayers.MP
 
             GameModificationHelpers.SetPrivateField<PlayerCard[]>(__instance, "playerCards", playerCards);
             GameModificationHelpers.SetPrivateField<NameSelector[]>(__instance, "nameSelectors", nameSelectors);
+
+            // ── Extend botCards (public field) ───────────────────────────────
+            BotCard[] botCards = __instance.botCards;
+            if (botCards != null && botCards.Length < maxP)
+            {
+                var extBotCards = new BotCard[maxP];
+                for (int i = 0; i < botCards.Length; i++)
+                    extBotCards[i] = botCards[i];
+
+                BotCard bcTemplate = botCards[0];
+                Transform bcRoot   = bcTemplate.transform.parent;
+
+                for (int i = botCards.Length; i < maxP; i++)
+                {
+                    GameObject cloned = UnityEngine.Object.Instantiate(bcTemplate.gameObject, bcRoot);
+                    cloned.name = $"Bot{i + 1} Card";
+
+                    var tf  = cloned.transform;
+                    var pos = tf.localPosition;
+                    pos.y   = -564.8f;
+                    tf.localPosition = pos;
+
+                    var bc = cloned.GetComponent<BotCard>();
+                    bc.playerColor = __instance.playerColors[i];
+                    bc.Init();
+                    bc.SetTeam(TeamColor.None);
+                    extBotCards[i] = bc;
+                }
+
+                __instance.botCards = extBotCards;
+            }
 
             Plugin.Log?.LogInfo($"[MorePlayers] PlayerSelection.Start extended to {maxP} cards.");
         }

@@ -1,0 +1,98 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net472</TargetFramework>
+		<OutputType>Library</OutputType>
+		<LangVersion>latest</LangVersion>
+		<PlatformTarget>AnyCPU</PlatformTarget>
+		<AssemblyName>MorePlayers</AssemblyName>
+		<RootNamespace>MorePlayers</RootNamespace>
+	</PropertyGroup>
+
+	<PropertyGroup>
+		<LibDir>..\MageKit\lib</LibDir>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<Reference Include="BepInEx">
+			<HintPath>$(LibDir)\BepInEx.dll</HintPath>
+		</Reference>
+
+		<Reference Include="UnityEngine">
+			<HintPath>$(LibDir)\UnityEngine.dll</HintPath>
+		</Reference>
+
+		<Reference Include="UnityEngine.CoreModule">
+			<HintPath>$(LibDir)\UnityEngine.CoreModule.dll</HintPath>
+		</Reference>
+
+		<Reference Include="UnityEngine.UI">
+			<HintPath>$(LibDir)\UnityEngine.UI.dll</HintPath>
+		</Reference>
+
+		<Reference Include="UnityEngine.TextRenderingModule">
+			<HintPath>$(LibDir)\UnityEngine.TextRenderingModule.dll</HintPath>
+		</Reference>
+
+		<Reference Include="0Harmony">
+			<HintPath>$(LibDir)\0Harmony.dll</HintPath>
+		</Reference>
+
+		<Reference Include="Assembly-CSharp">
+			<HintPath>$(LibDir)\Assembly-CSharp.dll</HintPath>
+		</Reference>
+
+		<Reference Include="Assembly-CSharp-firstpass">
+			<HintPath>$(LibDir)\Assembly-CSharp-firstpass.dll</HintPath>
+		</Reference>
+
+		<Reference Include="UnityEngine.PhysicsModule">
+			<HintPath>$(LibDir)\UnityEngine.PhysicsModule.dll</HintPath>
+		</Reference>
+
+		<Reference Include="UnityEngine.VideoModule">
+			<HintPath>$(LibDir)\UnityEngine.VideoModule.dll</HintPath>
+		</Reference>
+
+		<Reference Include="UnityEngine.AudioModule">
+			<HintPath>$(LibDir)\UnityEngine.AudioModule.dll</HintPath>
+		</Reference>
+
+		<Reference Include="UnityEngine.IMGUIModule">
+			<HintPath>$(LibDir)\UnityEngine.IMGUIModule.dll</HintPath>
+		</Reference>
+
+		<Reference Include="DOTween">
+			<HintPath>$(LibDir)\DOTween.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup Condition="Exists('..\MageQuitModFramework\MageQuitModFramework\MageQuitModFramework.csproj')">
+		<ProjectReference Include="..\MageQuitModFramework\MageQuitModFramework\MageQuitModFramework.csproj" />
+	</ItemGroup>
+
+	<ItemGroup Condition="!Exists('..\MageQuitModFramework\MageQuitModFramework\MageQuitModFramework.csproj')">
+		<Reference Include="MageQuitModFramework">
+			<HintPath>$(LibDir)\MageQuitModFramework.dll</HintPath>
+		</Reference>
+	</ItemGroup>
+
+	<PropertyGroup>
+		<BepInExPluginDir>
+			C:\Program Files (x86)\Steam\steamapps\common\MageQuit\BepInEx\plugins
+		</BepInExPluginDir>
+	</PropertyGroup>
+
+	<Target Name="CopyToBepInEx"
+			AfterTargets="Build"
+			Condition="Exists('$(BepInExPluginDir)')">
+
+		<ItemGroup>
+			<PluginDlls Include="$(OutputPath)MorePlayers.dll" />
+		</ItemGroup>
+
+		<Copy SourceFiles="@(PluginDlls)"
+				DestinationFolder="$(BepInExPluginDir)" />
+	</Target>
+
+</Project>

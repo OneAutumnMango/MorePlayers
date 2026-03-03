@@ -109,20 +109,80 @@ namespace MorePlayers.MP
             Plugin.Log?.LogInfo($"[MorePlayers] PlayerSelection arrays resized to {maxP}.");
         }
 
-        // ── PATCH 5: PlayerSelection.Start [Postfix] ─────────────────────────
+        // ── PATCH 5a: PlayerSelection.Start [Prefix] ─────────────────────────
+        // botCards must be extended BEFORE vanilla Start runs because Start's
+        // final line calls RefreshBots(), which does botCards[playerId - 1].
+        // DetermineBots (patched) fills up to maxP bots → botCards[9+] crash.
+        // botCards is public Inspector-assigned (10 elements) — safe to clone here.
+        // playerColors[0-maxP-1] is already extended by the Awake Postfix.
+
+        [HarmonyPatch(typeof(PlayerSelection), "Start")]
+        [HarmonyPrefix]
+        private static void PlayerSelection_Start_Prefix(PlayerSelection __instance)
+        {
+            int maxP = Plugin.MaxPlayers;
+            if (maxP <= 10) return;
+
+            BotCard[] botCards = __instance.botCards;
+            if (botCards == null || botCards.Length >= maxP) return;
+
+            // ── Step 1: Scale original 10 bot cards and redistribute their Y positions ──
+            // bot cards are at scene-assigned Y positions (not -564.8f).
+            // ShowHide() only calls SetActive() — no position change at show-time.
+            // We must fit all maxP cards in the same [top, bottom] vertical range.
+            float bcYTop    = botCards[0].transform.localPosition.y;
+            float bcYBottom = botCards[botCards.Length - 1].transform.localPosition.y;
+            float bcScale   = (float)botCards.Length / maxP;
+
+            for (int i = 0; i < botCards.Length; i++)
+            {
+                botCards[i].transform.localScale = Vector3.one * bcScale;
+                var p = botCards[i].transform.localPosition;
+                p.y = Mathf.Lerp(bcYTop, bcYBottom, (float)i / (maxP - 1));
+                botCards[i].transform.localPosition = p;
+            }
+
+            // ── Step 2: Clone and position cards for slots botCards.Length to maxP-1 ──
+            var extBotCards = new BotCard[maxP];
+            for (int i = 0; i < botCards.Length; i++)
+                extBotCards[i] = botCards[i];
+
+            BotCard   bcTemplate = botCards[0];
+            Transform bcRoot     = bcTemplate.transform.parent;
+
+            for (int i = botCards.Length; i < maxP; i++)
+            {
+                GameObject cloned = UnityEngine.Object.Instantiate(bcTemplate.gameObject, bcRoot);
+                cloned.name = $"Bot{i + 1} Card";
+
+                var tf  = cloned.transform;
+                var pos = tf.localPosition;
+                pos.y   = Mathf.Lerp(bcYTop, bcYBottom, (float)i / (maxP - 1));
+                tf.localPosition = pos;
+                tf.localScale    = Vector3.one * bcScale;
+
+                var bc = cloned.GetComponent<BotCard>();
+                bc.playerColor = __instance.playerColors[i];
+                bc.Init();
+                bc.SetTeam(TeamColor.None);
+                extBotCards[i] = bc;
+            }
+
+            __instance.botCards = extBotCards;
+            Plugin.Log?.LogInfo($"[MorePlayers] botCards extended to {maxP} (pre-Start).");
+        }
+
+        // ── PATCH 5b: PlayerSelection.Start [Postfix] ────────────────────────
         // Vanilla Start fills slots 0-9 from 10 scene children.
-        // Clone playerCards[0] and botCards[0] for slots 10 to MAX-1.
-        // Scale all cards down so two rows of MAX/2 fit the same canvas width.
-        //
-        // botCards must be extended here because RefreshBots() does:
-        //   this.botCards[playerId - 1]
-        // which crashes at index 10+ if botCards is still size 10.
+        // Clone playerCards[0] for slots 10 to MAX-1, scale all to 10f/maxP,
+        // and redistribute X positions so two rows of maxP/2 are evenly spaced.
 
         [HarmonyPatch(typeof(PlayerSelection), "Start")]
         [HarmonyPostfix]
         private static void PlayerSelection_Start_Postfix(PlayerSelection __instance)
         {
-            int maxP = Plugin.MaxPlayers;
+            int maxP    = Plugin.MaxPlayers;
+            int halfMax = maxP / 2;
             if (maxP <= 10) return;
 
             var playerCards   = GameModificationHelpers.GetPrivateField<PlayerCard[]>(__instance, "playerCards");
@@ -146,7 +206,7 @@ namespace MorePlayers.MP
                 sharedPC.colors = ext;
             }
 
-            // ── Extend playerCards ───────────────────────────────────────────
+            // ── Step 1: Clone player cards for slots 10 to maxP-1 ───────────
             PlayerCard pcTemplate = playerCards[0];
             Transform  pcRoot     = pcTemplate.transform.parent;
             float      scale      = 10f / maxP;
@@ -180,39 +240,29 @@ namespace MorePlayers.MP
                 nameSelectors[i] = ns;
             }
 
+            // ── Step 2: Redistribute X positions for all maxP cards ──────────
+            // Vanilla 10 cards are at evenly-spaced X positions for 5-per-row.
+            // After switching to halfMax-per-row we recalculate X from the
+            // original min/max extent so all cards fit within the same canvas width.
+            float xMin = float.MaxValue, xMax = float.MinValue;
+            for (int i = 0; i < 10; i++)
+            {
+                float x = playerCards[i].transform.localPosition.x;
+                if (x < xMin) xMin = x;
+                if (x > xMax) xMax = x;
+            }
+
+            for (int i = 0; i < maxP; i++)
+            {
+                int   col = i < halfMax ? i : i - halfMax;
+                float t   = halfMax > 1 ? (float)col / (halfMax - 1) : 0.5f;
+                var   pos = playerCards[i].transform.localPosition;
+                pos.x = Mathf.Lerp(xMin, xMax, t);
+                playerCards[i].transform.localPosition = pos;
+            }
+
             GameModificationHelpers.SetPrivateField<PlayerCard[]>(__instance, "playerCards", playerCards);
             GameModificationHelpers.SetPrivateField<NameSelector[]>(__instance, "nameSelectors", nameSelectors);
-
-            // ── Extend botCards (public field) ───────────────────────────────
-            BotCard[] botCards = __instance.botCards;
-            if (botCards != null && botCards.Length < maxP)
-            {
-                var extBotCards = new BotCard[maxP];
-                for (int i = 0; i < botCards.Length; i++)
-                    extBotCards[i] = botCards[i];
-
-                BotCard bcTemplate = botCards[0];
-                Transform bcRoot   = bcTemplate.transform.parent;
-
-                for (int i = botCards.Length; i < maxP; i++)
-                {
-                    GameObject cloned = UnityEngine.Object.Instantiate(bcTemplate.gameObject, bcRoot);
-                    cloned.name = $"Bot{i + 1} Card";
-
-                    var tf  = cloned.transform;
-                    var pos = tf.localPosition;
-                    pos.y   = -564.8f;
-                    tf.localPosition = pos;
-
-                    var bc = cloned.GetComponent<BotCard>();
-                    bc.playerColor = __instance.playerColors[i];
-                    bc.Init();
-                    bc.SetTeam(TeamColor.None);
-                    extBotCards[i] = bc;
-                }
-
-                __instance.botCards = extBotCards;
-            }
 
             Plugin.Log?.LogInfo($"[MorePlayers] PlayerSelection.Start extended to {maxP} cards.");
         }
@@ -323,18 +373,35 @@ namespace MorePlayers.MP
             Plugin.Log?.LogInfo($"[MorePlayers] BattleManager color arrays extended to {maxP}.");
         }
 
-        // ── PATCH 11: SelectionMenu.ChangeNumberOfBots [Transpiler] ──────────
-        // (num + (up ? 1 : 10)) % 11
-        //   10 → MAX_PLAYERS      (wrap-back value)
-        //   11 → MAX_PLAYERS + 1  (modulo divisor)
+        // ── PATCH 11: SelectionMenu.ChangeNumberOfBots [Prefix] ──────────────
+        // Dynamic cap: max bots = MaxPlayers - current human-player count.
+        // Wraps numberOfBots within [0, maxBots] with the same cyclic logic as vanilla.
+        // Calls private ShowNumberOfBots() via reflection to update the UI.
+        // Returns false to skip the original (no transpiler label-clobbering needed).
 
         [HarmonyPatch(typeof(SelectionMenu), "ChangeNumberOfBots")]
-        [HarmonyTranspiler]
-        private static IEnumerable<CodeInstruction> ChangeNumberOfBots_Transpiler(
-            IEnumerable<CodeInstruction> instructions)
+        [HarmonyPrefix]
+        private static bool ChangeNumberOfBots_Prefix(SelectionMenu __instance, bool up)
         {
-            instructions = GameModificationHelpers.ReplaceIntConstant(instructions, 10, Plugin.MaxPlayers);
-            return GameModificationHelpers.ReplaceIntConstant(instructions, 11, Plugin.MaxPlayers + 1);
+            int humanPlayers = PlayerManager.players
+                .Count(kv => kv.Value.inputType != InputType.AI);
+            int maxBots = Mathf.Max(0, Plugin.MaxPlayers - humanPlayers);
+
+            int num = PlayerManager.gameSettings.numberOfBots;
+            if (maxBots == 0)
+            {
+                num = 0;
+            }
+            else
+            {
+                num = (num + (up ? 1 : maxBots)) % (maxBots + 1);
+            }
+            PlayerManager.gameSettings.numberOfBots = num;
+
+            AccessTools.Method(typeof(SelectionMenu), "ShowNumberOfBots")
+                ?.Invoke(__instance, null);
+
+            return false;
         }
 
         // ── PATCH 12: SpellManager.Awake [Postfix] ───────────────────────────

@@ -10,7 +10,7 @@
 	</PropertyGroup>
 
 	<PropertyGroup>
-		<LibDir>..\MageKit\lib</LibDir>
+		<LibDir>lib</LibDir>
 	</PropertyGroup>
 
 	<ItemGroup>
